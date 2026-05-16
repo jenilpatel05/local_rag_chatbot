@@ -12,8 +12,8 @@ UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 # ── Ollama ─────────────────────────────────────────────────────────────────
 # Env var lets Docker compose point the app at the ollama service container.
 OLLAMA_BASE_URL   = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-LLM_MODEL         = "llama3"          # swap to "mistral" or "phi3" freely
-EMBED_MODEL       = "nomic-embed-text"
+LLM_MODEL         = os.getenv("LLM_MODEL", "llama3")
+EMBED_MODEL       = os.getenv("EMBED_MODEL", "nomic-embed-text")
 
 # ── Chunking ───────────────────────────────────────────────────────────────
 CHUNK_SIZE        = 500
