@@ -31,6 +31,7 @@ from rag_chatbot.ingest import (
     ingest_source,
     list_ingested_sources,
 )
+from rag_chatbot.ollama_utils import list_installed_models
 from rag_chatbot.rag_chain import BASE_RULES, query as rag_query, stream_query
 
 # ── Page config ────────────────────────────────────────────────────────────
@@ -193,11 +194,21 @@ with st.sidebar:
 
     # ── Settings ───────────────────────────────────────────────────────────
     st.markdown("### Settings")
-    model_choice = st.selectbox(
-        "LLM model",
-        ["llama3", "mistral", "phi3", "llama3:8b", "gemma2"],
-        index=0,
-    )
+
+    @st.cache_data(ttl=30)
+    def _available_models() -> list[str]:
+        return list_installed_models()
+
+    installed = _available_models()
+    if installed:
+        default_idx = installed.index(LLM_MODEL) if LLM_MODEL in installed else 0
+        model_choice = st.selectbox("LLM model", installed, index=default_idx)
+    else:
+        st.warning(
+            "Could not reach Ollama or no models are installed. "
+            "Run `ollama pull <model>` first."
+        )
+        model_choice = st.text_input("LLM model (manual)", value=LLM_MODEL)
     top_k = st.slider("Chunks retrieved (top-K)", min_value=1, max_value=10, value=TOP_K)
     use_mmr     = st.toggle("MMR retrieval (diversity)",       value=True)
     use_hybrid  = st.toggle("Hybrid search (BM25 + vector)",   value=USE_HYBRID)
