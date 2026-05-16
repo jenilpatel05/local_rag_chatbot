@@ -28,7 +28,7 @@ from ragas.metrics import (
     faithfulness,
 )
 
-from rag_chain import build_chain, query as rag_query
+from rag_chain import query as rag_query
 from config import LLM_MODEL, TOP_K
 
 
