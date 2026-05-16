@@ -81,6 +81,8 @@ if "messages" not in st.session_state:
     st.session_state.messages = []          # [{role, content, sources?, elapsed?}]
 if "ingested" not in st.session_state:
     st.session_state.ingested = list_ingested_sources()
+if "doc_filter" not in st.session_state:
+    st.session_state.doc_filter = []
 
 
 # ── Sidebar ────────────────────────────────────────────────────────────────
@@ -146,9 +148,23 @@ with st.sidebar:
                 n = delete_source(fname)
                 st.toast(f"Removed {n} chunks from {fname}")
                 st.session_state.ingested = list_ingested_sources()
+                st.session_state.doc_filter = [
+                    f for f in st.session_state.doc_filter if f != fname
+                ]
                 st.rerun()
     else:
         st.caption("No documents yet — upload a file or URL above.")
+
+    if ingested:
+        st.session_state.doc_filter = [
+            f for f in st.session_state.doc_filter if f in ingested
+        ]
+        st.multiselect(
+            "Filter retrieval to selected docs",
+            options=ingested,
+            key="doc_filter",
+            help="Empty = search all documents. Pick one or more to scope queries.",
+        )
 
     st.divider()
 
@@ -237,6 +253,7 @@ else:
                         use_hybrid=use_hybrid,
                         use_rerank=use_rerank,
                         history=history,
+                        sources_filter=st.session_state.doc_filter or None,
                     ):
                         if event["type"] == "sources":
                             sources = event["sources"]
@@ -292,6 +309,7 @@ else:
                             use_hybrid=use_hybrid,
                             use_rerank=use_rerank,
                             history=history,
+                            sources_filter=st.session_state.doc_filter or None,
                         )
                         elapsed = time.time() - t0
                         answer  = result.answer

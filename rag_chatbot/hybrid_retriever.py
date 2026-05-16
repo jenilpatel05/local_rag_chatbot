@@ -8,6 +8,8 @@ normalised score combination. Use when you want both exact-keyword recall
 
 from __future__ import annotations
 
+from typing import Optional
+
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.callbacks import CallbackManagerForRetrieverRun
@@ -29,24 +31,33 @@ class HybridRetriever(BaseRetriever):
     top_k:            int   = Field(default=5)
     vector_weight:    float = Field(default=HYBRID_VECTOR_WEIGHT)
     fetch_k:          int   = Field(default=HYBRID_FETCH_K)
+    sources_filter:   Optional[list[str]] = Field(default=None)
 
     class Config:
         arbitrary_types_allowed = True
 
+    def _vector_filter(self) -> Optional[dict]:
+        if not self.sources_filter:
+            return None
+        if len(self.sources_filter) == 1:
+            return {"source": self.sources_filter[0]}
+        return {"source": {"$in": list(self.sources_filter)}}
+
     def _get_relevant_documents(
         self, query: str, *, run_manager: CallbackManagerForRetrieverRun
     ) -> list[Document]:
-        # Pull a wide candidate pool from each retriever
         try:
             self.bm25_retriever.k = self.fetch_k
         except Exception:
             pass
         bm25_docs = self.bm25_retriever.invoke(query)
 
-        # Chroma similarity_search_with_score returns (doc, distance). Lower is better
-        # for cosine distance, so convert to similarity = 1 / (1 + distance).
         vs = self.vector_retriever
-        vec_results = vs.similarity_search_with_score(query, k=self.fetch_k)
+        vec_kwargs = {"k": self.fetch_k}
+        flt = self._vector_filter()
+        if flt is not None:
+            vec_kwargs["filter"] = flt
+        vec_results = vs.similarity_search_with_score(query, **vec_kwargs)
 
         # Build dictionaries keyed by chunk_id (or text hash as a fallback)
         def key(doc: Document) -> str:
@@ -84,11 +95,12 @@ class HybridRetriever(BaseRetriever):
         return [doc for _, doc in fused[: self.top_k]]
 
 
-def build_hybrid_retriever(vectorstore, all_chunks: list[dict], top_k: int):
-    """
-    Factory: takes the Chroma vectorstore and the full chunk list
-    (needed for BM25), returns a HybridRetriever.
-    """
+def build_hybrid_retriever(
+    vectorstore,
+    all_chunks: list[dict],
+    top_k: int,
+    sources_filter: Optional[list[str]] = None,
+):
     try:
         from langchain_community.retrievers import BM25Retriever
     except ImportError as e:
@@ -112,4 +124,5 @@ def build_hybrid_retriever(vectorstore, all_chunks: list[dict], top_k: int):
         vector_retriever=vectorstore,
         bm25_retriever=bm25,
         top_k=top_k,
+        sources_filter=sources_filter,
     )

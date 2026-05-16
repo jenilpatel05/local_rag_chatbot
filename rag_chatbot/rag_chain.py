@@ -144,34 +144,42 @@ def _docs_to_sources(docs: list[Document]) -> list[dict]:
     return sources
 
 
+def _build_source_filter(sources: Optional[list[str]]) -> Optional[dict]:
+    if not sources:
+        return None
+    if len(sources) == 1:
+        return {"source": sources[0]}
+    return {"source": {"$in": list(sources)}}
+
+
 def _retrieve(
     question: str,
     top_k: int,
     use_mmr: bool,
     use_hybrid: bool,
     use_rerank: bool,
+    sources_filter: Optional[list[str]] = None,
 ) -> list[Document]:
-    """
-    Run the configured retrieval pipeline and return the final ordered docs.
-    Reranking, if enabled, oversamples then reranks down to top_k.
-    """
     vs = _get_vectorstore()
     fetch_k = RERANK_FETCH_K if use_rerank else top_k
 
-    # Hybrid path
     if use_hybrid:
         from rag_chatbot.ingest import get_all_chunks
         from rag_chatbot.hybrid_retriever import build_hybrid_retriever
         try:
-            hybrid = build_hybrid_retriever(vs, get_all_chunks(), top_k=fetch_k)
+            chunks = get_all_chunks()
+            if sources_filter:
+                allowed = set(sources_filter)
+                chunks = [c for c in chunks if c["metadata"].get("source") in allowed]
+            hybrid = build_hybrid_retriever(
+                vs, chunks, top_k=fetch_k, sources_filter=sources_filter,
+            )
             docs = hybrid.invoke(question)
         except Exception:
-            # Fall through to vector retrieval if hybrid setup fails
-            docs = _vector_retrieve(vs, question, fetch_k, use_mmr)
+            docs = _vector_retrieve(vs, question, fetch_k, use_mmr, sources_filter)
     else:
-        docs = _vector_retrieve(vs, question, fetch_k, use_mmr)
+        docs = _vector_retrieve(vs, question, fetch_k, use_mmr, sources_filter)
 
-    # Optional rerank
     if use_rerank and docs:
         from rag_chatbot.reranker import rerank
         docs = rerank(question, docs, top_k=top_k)
@@ -181,31 +189,39 @@ def _retrieve(
     return docs
 
 
-def _vector_retrieve(vs: Chroma, question: str, k: int, use_mmr: bool) -> list[Document]:
+def _vector_retrieve(
+    vs: Chroma,
+    question: str,
+    k: int,
+    use_mmr: bool,
+    sources_filter: Optional[list[str]] = None,
+) -> list[Document]:
+    search_kwargs: dict = {"k": k}
+    flt = _build_source_filter(sources_filter)
+    if flt is not None:
+        search_kwargs["filter"] = flt
     if use_mmr:
-        retriever = vs.as_retriever(
-            search_type="mmr",
-            search_kwargs={"k": k, "fetch_k": MMR_FETCH_K},
-        )
+        search_kwargs["fetch_k"] = MMR_FETCH_K
+        retriever = vs.as_retriever(search_type="mmr", search_kwargs=search_kwargs)
     else:
-        retriever = vs.as_retriever(search_type="similarity", search_kwargs={"k": k})
+        retriever = vs.as_retriever(search_type="similarity", search_kwargs=search_kwargs)
     return retriever.invoke(question)
 
 
 # ── Public API: blocking query ─────────────────────────────────────────────
 
 def query(
-    question:    str,
-    model:       str  = LLM_MODEL,
-    top_k:       int  = TOP_K,
-    use_mmr:     bool = USE_MMR,
-    use_hybrid:  bool = USE_HYBRID,
-    use_rerank:  bool = USE_RERANK,
-    temperature: float = 0.1,
-    history:     Optional[list[dict]] = None,
+    question:       str,
+    model:          str  = LLM_MODEL,
+    top_k:          int  = TOP_K,
+    use_mmr:        bool = USE_MMR,
+    use_hybrid:     bool = USE_HYBRID,
+    use_rerank:     bool = USE_RERANK,
+    temperature:    float = 0.1,
+    history:        Optional[list[dict]] = None,
+    sources_filter: Optional[list[str]] = None,
 ) -> RAGResult:
-    """Run a question through the RAG pipeline and return the full answer + sources."""
-    docs = _retrieve(question, top_k, use_mmr, use_hybrid, use_rerank)
+    docs = _retrieve(question, top_k, use_mmr, use_hybrid, use_rerank, sources_filter)
     context = _format_context(docs)
 
     llm = OllamaLLM(model=model, base_url=OLLAMA_BASE_URL, temperature=temperature)
@@ -226,24 +242,17 @@ def query(
 # ── Public API: streaming query ────────────────────────────────────────────
 
 def stream_query(
-    question:    str,
-    model:       str  = LLM_MODEL,
-    top_k:       int  = TOP_K,
-    use_mmr:     bool = USE_MMR,
-    use_hybrid:  bool = USE_HYBRID,
-    use_rerank:  bool = USE_RERANK,
-    temperature: float = 0.1,
-    history:     Optional[list[dict]] = None,
+    question:       str,
+    model:          str  = LLM_MODEL,
+    top_k:          int  = TOP_K,
+    use_mmr:        bool = USE_MMR,
+    use_hybrid:     bool = USE_HYBRID,
+    use_rerank:     bool = USE_RERANK,
+    temperature:    float = 0.1,
+    history:        Optional[list[dict]] = None,
+    sources_filter: Optional[list[str]] = None,
 ) -> Generator[dict, None, None]:
-    """
-    Yield events as the answer is generated. Event shapes:
-      {"type": "sources", "sources": [...]}     — emitted once, before generation
-      {"type": "token",   "token":   "..."}     — emitted per LLM token
-      {"type": "done"}                          — emitted once at the end
-
-    The caller is responsible for accumulating tokens into the final answer string.
-    """
-    docs = _retrieve(question, top_k, use_mmr, use_hybrid, use_rerank)
+    docs = _retrieve(question, top_k, use_mmr, use_hybrid, use_rerank, sources_filter)
     sources = _docs_to_sources(docs)
     yield {"type": "sources", "sources": sources}
 
