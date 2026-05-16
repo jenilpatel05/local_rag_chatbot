@@ -1,0 +1,49 @@
+# docker-compose.yml
+#
+# Runs two services:
+#   • ollama  — the LLM runtime (pulls models, serves on :11434)
+#   • app     — the Streamlit chat UI (on :8501)
+#
+# Quickstart:
+#   docker compose up -d
+#   docker compose exec ollama ollama pull llama3
+#   docker compose exec ollama ollama pull nomic-embed-text
+#   open http://localhost:8501
+#
+# Note: GPU support requires the nvidia container toolkit on the host.
+# Comment out the `deploy:` block on CPU-only machines.
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: rag-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    # Uncomment for GPU acceleration (requires nvidia-container-toolkit):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  app:
+    build: .
+    container_name: rag-app
+    ports:
+      - "8501:8501"
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+    volumes:
+      - ./data:/app/data        # persist ChromaDB across restarts
+      - ./uploads:/app/uploads  # persist uploaded files
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+volumes:
+  ollama_data:
