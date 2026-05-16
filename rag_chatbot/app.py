@@ -6,7 +6,9 @@ Run:  streamlit run app.py
 
 from __future__ import annotations
 
+import json
 import time
+from datetime import datetime
 
 import streamlit as st
 
@@ -23,6 +25,7 @@ from rag_chatbot.config import (
     USE_RERANK,
     USE_STREAMING,
 )
+from rag_chatbot.exporters import conversation_as_markdown
 from rag_chatbot.ingest import (
     delete_source,
     ingest_source,
@@ -223,7 +226,33 @@ with st.sidebar:
                 st.session_state[k] = v
             st.rerun()
 
-    if st.button("🗑️ Clear conversation", use_container_width=True):
+    st.divider()
+    st.markdown("### Conversation")
+    has_msgs = bool(st.session_state.messages)
+
+    md_text = conversation_as_markdown(st.session_state.messages) if has_msgs else ""
+    json_text = json.dumps(st.session_state.messages, indent=2, default=str) if has_msgs else ""
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+
+    col_md, col_json = st.columns(2)
+    col_md.download_button(
+        "Markdown",
+        data=md_text,
+        file_name=f"chat-{stamp}.md",
+        mime="text/markdown",
+        disabled=not has_msgs,
+        use_container_width=True,
+    )
+    col_json.download_button(
+        "JSON",
+        data=json_text,
+        file_name=f"chat-{stamp}.json",
+        mime="application/json",
+        disabled=not has_msgs,
+        use_container_width=True,
+    )
+
+    if st.button("🗑️ Clear conversation", use_container_width=True, disabled=not has_msgs):
         st.session_state.messages = []
         st.rerun()
 
