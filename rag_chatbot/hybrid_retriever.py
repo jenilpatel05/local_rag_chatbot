@@ -1,11 +1,3 @@
-"""
-hybrid_retriever.py  —  BM25 + dense vector hybrid retrieval
--------------------------------------------------------------
-Fuses keyword search (BM25) with semantic search (Chroma vectors) using
-normalised score combination. Use when you want both exact-keyword recall
-(names, codes, acronyms) AND semantic recall (paraphrases, concepts).
-"""
-
 from __future__ import annotations
 
 from typing import Optional
@@ -19,19 +11,12 @@ from rag_chatbot.config import HYBRID_FETCH_K, HYBRID_VECTOR_WEIGHT
 
 
 class HybridRetriever(BaseRetriever):
-    """
-    Combines a BM25 retriever and a vector retriever, normalises both
-    score sets to [0, 1] independently, then fuses with a weighted sum.
-
-    Final score = w * vector_norm + (1 - w) * bm25_norm
-    """
-
     vector_retriever: object = Field(...)
-    bm25_retriever:   object = Field(...)
-    top_k:            int   = Field(default=5)
-    vector_weight:    float = Field(default=HYBRID_VECTOR_WEIGHT)
-    fetch_k:          int   = Field(default=HYBRID_FETCH_K)
-    sources_filter:   Optional[list[str]] = Field(default=None)
+    bm25_retriever: object = Field(...)
+    top_k: int = Field(default=5)
+    vector_weight: float = Field(default=HYBRID_VECTOR_WEIGHT)
+    fetch_k: int = Field(default=HYBRID_FETCH_K)
+    sources_filter: Optional[list[str]] = Field(default=None)
 
     class Config:
         arbitrary_types_allowed = True
@@ -59,21 +44,16 @@ class HybridRetriever(BaseRetriever):
             vec_kwargs["filter"] = flt
         vec_results = vs.similarity_search_with_score(query, **vec_kwargs)
 
-        # Build dictionaries keyed by chunk_id (or text hash as a fallback)
         def key(doc: Document) -> str:
             return doc.metadata.get("chunk_id") or str(hash(doc.page_content))
 
-        # Vector scores: convert distance → similarity, then min-max normalise
         vec_sims = {key(doc): 1.0 / (1.0 + float(dist)) for doc, dist in vec_results}
         vec_docs = {key(doc): doc for doc, _ in vec_results}
 
-        # BM25 doesn't return scores directly via invoke(), so we rank by position.
-        # Rank-based score: 1 - (rank / N) gives a smooth descending score in [0, 1].
         n = max(len(bm25_docs), 1)
         bm25_scores = {key(doc): 1.0 - (i / n) for i, doc in enumerate(bm25_docs)}
         bm25_docs_map = {key(doc): doc for doc in bm25_docs}
 
-        # Min-max normalise vec_sims to [0, 1]
         if vec_sims:
             lo, hi = min(vec_sims.values()), max(vec_sims.values())
             span = hi - lo or 1.0
@@ -81,7 +61,6 @@ class HybridRetriever(BaseRetriever):
         else:
             vec_norm = {}
 
-        # Fuse
         all_keys = set(vec_norm) | set(bm25_scores)
         w = self.vector_weight
         fused: list[tuple[float, Document]] = []
@@ -104,13 +83,9 @@ def build_hybrid_retriever(
     try:
         from langchain_community.retrievers import BM25Retriever
     except ImportError as e:
-        raise ImportError(
-            "rank_bm25 is required for hybrid search. "
-            "Install with: pip install rank_bm25"
-        ) from e
+        raise ImportError("rank_bm25 is required for hybrid search.") from e
 
     if not all_chunks:
-        # No documents yet — caller should fall back to pure vector
         raise ValueError("No documents ingested; cannot build BM25 index.")
 
     docs = [

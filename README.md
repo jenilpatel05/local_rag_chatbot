@@ -17,8 +17,8 @@ make pull-light               # pull llama3.2:1b + nomic-embed-text (~1.6 GB)
 open http://localhost:8501    # open the UI
 ```
 
-Upload a PDF in the sidebar, pick `llama3.2:1b` from the model dropdown,
-ask a question.
+That's it. Upload a PDF in the sidebar, pick `llama3.2:1b` from the model
+dropdown, ask a question.
 
 ## Features
 
@@ -33,24 +33,27 @@ Core RAG pipeline:
 
 Chat / UX:
 
-- Document filter: multi-select chips in the sidebar to scope retrieval
-  to specific source files (Chroma `$in` metadata filter)
-- Advanced settings: temperature, chunk size, chunk overlap, custom
-  system prompt
-- Conversation export to Markdown or JSON
-- Query rewriting for follow-up questions
-- Auto-detected model dropdown (reads from Ollama's `/api/tags`)
-- Chat memory across the last N turns
+- **Document filter** - multi-select chips in the sidebar to scope retrieval
+  to specific source files (uses Chroma `$in` metadata filter)
+- **Advanced settings** - adjust temperature, chunk size, chunk overlap, and
+  custom system prompt directly in the sidebar
+- **Conversation export** - download the current chat as Markdown or JSON
+- **Query rewriting** - LLM turns follow-ups like "what about chapter 4?"
+  into standalone queries before retrieval
+- **Auto-detected model dropdown** - reads installed models from
+  Ollama's `/api/tags` so the picker never lies about what's pulled
+- **Chat memory** - last N user / assistant turns fed into the prompt
 
 Infra / dev:
 
-- `rag-chatbot` CLI: ingest, ask, list, delete, eval
-- `pyproject.toml` so the package installs with `pip install -e .`
-- Makefile for build / up / down / pull / test / eval
-- Unit tests with pytest (no LLM required)
-- `LLM_MODEL` and `EMBED_MODEL` overridable from the environment
-- Docker Compose with Streamlit app + Ollama, persistent volumes for
-  ChromaDB and uploads
+- **CLI entrypoint** - `rag-chatbot ingest|ask|list|delete|eval`
+- **pyproject.toml** - install with `pip install -e .`
+- **Makefile** - `make build / up / down / logs / pull / pull-light / test / eval`
+- **Unit tests** - chunking determinism, source filter shape, conversation
+  export formatting (no LLM needed)
+- **Env-overridable models** - `LLM_MODEL` and `EMBED_MODEL` env vars
+- Docker Compose stack: Streamlit app + Ollama, with persistent volumes
+  for ChromaDB and uploads
 
 ## Project structure
 
@@ -58,22 +61,22 @@ Infra / dev:
 local_rag_chatbot/
 ├── rag_chatbot/
 │   ├── __init__.py
-│   ├── config.py
-│   ├── ingest.py
-│   ├── rag_chain.py
-│   ├── hybrid_retriever.py
-│   ├── reranker.py
-│   ├── exporters.py
-│   ├── ollama_utils.py
-│   ├── evaluate.py
-│   ├── cli.py
-│   └── app.py
+│   ├── config.py             # paths, model names, default toggles
+│   ├── ingest.py             # extraction + chunking + Chroma
+│   ├── rag_chain.py          # retrieval + prompt + LLM
+│   ├── hybrid_retriever.py   # BM25 + vector score fusion
+│   ├── reranker.py           # cross-encoder rerank
+│   ├── exporters.py          # markdown conversation export
+│   ├── ollama_utils.py       # /api/tags helper
+│   ├── evaluate.py           # RAGAS evaluation
+│   ├── cli.py                # argparse-based CLI
+│   └── app.py                # Streamlit UI
 ├── tests/
 │   ├── test_chunking.py
 │   ├── test_source_filter.py
 │   └── test_exporters.py
-├── data/chroma_db/
-├── uploads/
+├── data/chroma_db/           # persisted vector store (gitignored)
+├── uploads/                  # uploaded files (gitignored)
 ├── Dockerfile
 ├── docker-compose.yml
 ├── pyproject.toml
@@ -85,15 +88,19 @@ local_rag_chatbot/
 ## Run with Docker
 
 ```bash
+# 1. Build and start ollama + app
 make build
 make up
 
+# 2. Pull models inside the ollama container
 make pull          # llama3 (4.7 GB) + nomic-embed-text (280 MB)
 # or, on a low-RAM host (< 8 GB Docker memory):
 make pull-light    # llama3.2:1b (1.3 GB) + nomic-embed-text
 
+# 3. Open the UI
 open http://localhost:8501
 
+# Tail / stop
 make logs
 make down
 ```
@@ -101,57 +108,74 @@ make down
 Inside the UI:
 
 1. Upload a PDF / DOCX / TXT / MD, or paste a URL
-2. (Optional) Tick documents in "Filter retrieval to selected docs" to
+2. (Optional) Tick documents in **"Filter retrieval to selected docs"** to
    scope the query
-3. (Optional) Open "Advanced settings" to change temperature, chunk
-   size, or the system prompt
+3. (Optional) Open **"Advanced settings"** to change temperature / chunk
+   size / system prompt
 4. Ask a question
 
 ## Run locally (without Docker)
 
+You need Ollama installed on the host.
+
 ```bash
+# 1. Pull models via Ollama
 ollama pull llama3
 ollama pull nomic-embed-text
 
+# 2. Install the package into a venv
 python -m venv .venv && source .venv/bin/activate
-make install
+make install   # pip install -e .
 
+# 3. Run the UI
 streamlit run rag_chatbot/app.py
 ```
 
 ## CLI
 
+Once installed, the same operations are available as a CLI:
+
 ```bash
+# Ingest files or URLs (idempotent - re-ingesting skips existing chunks)
 rag-chatbot ingest path/to/file.pdf
 rag-chatbot ingest https://example.com/article
+
+# Ask a question
 rag-chatbot ask "what does chapter 3 say about X?"
 rag-chatbot ask "summarise the main topics" --model llama3.2:1b --top_k 8
+
+# Manage the corpus
 rag-chatbot list
 rag-chatbot delete file.pdf
-rag-chatbot eval --create_sample
+
+# Evaluation
+rag-chatbot eval --create_sample    # writes test_questions.json template
 rag-chatbot eval --qa_path test_questions.json
 ```
 
 ## Tests
 
 ```bash
-make test          # pytest inside the running app container
-make test-local    # pytest in a local venv
+make test          # runs pytest inside the running app container
+make test-local    # if you've already installed deps in a local venv
 ```
 
 ## Evaluation (RAGAS)
 
 ```bash
-rag-chatbot eval --create_sample    # writes test_questions.json template
-make eval                           # runs RAGAS against the corpus
+# 1. Generate a QA template, fill it with real Q + ground truth pairs
+rag-chatbot eval --create_sample
+
+# 2. Run evaluation against the indexed corpus
+make eval
 ```
 
-Results land in `ragas_results.csv`.
+Results are written to `ragas_results.csv`.
 
 ## Configuration
 
 Most defaults live in `rag_chatbot/config.py`. The two model names are
-also overridable via env vars:
+also overridable via env vars (useful in `docker-compose.yml`):
 
 ```bash
 LLM_MODEL=llama3.2:1b

@@ -1,17 +1,6 @@
-"""
-rag_chain.py  —  RAG retrieval chain
----------------------------------------
-Pipeline:
-  retrieve (vector | hybrid)  →  optional rerank  →  build prompt
-  (with optional chat history)  →  Llama 3 via Ollama  →  cited answer
-
-Two query entrypoints:
-  • query(...)         — blocking, returns full RAGResult
-  • stream_query(...)  — generator yielding (token, sources) for streaming UIs
-"""
-
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Generator, Optional
 
@@ -35,8 +24,6 @@ from rag_chatbot.config import (
 )
 
 
-# ── Prompt templates ───────────────────────────────────────────────────────
-
 BASE_RULES = """You are a precise document assistant. Answer the user's question using ONLY the context passages provided below.
 
 Rules:
@@ -44,6 +31,42 @@ Rules:
 2. After each factual claim, add a citation in the format: [Source: <filename>, Page <number>]
 3. If the answer is not found in the context, respond exactly: "I don't know based on the provided documents."
 4. Be concise and factual. Do not repeat the question."""
+
+
+@dataclass
+class RAGResult:
+    answer: str
+    sources: list[dict] = field(default_factory=list)
+
+
+def _get_vectorstore() -> Chroma:
+    embeddings = OllamaEmbeddings(model=EMBED_MODEL, base_url=OLLAMA_BASE_URL)
+    return Chroma(
+        collection_name=COLLECTION_NAME,
+        embedding_function=embeddings,
+        persist_directory=str(CHROMA_DIR),
+    )
+
+
+def _format_context(docs: list[Document]) -> str:
+    blocks = []
+    for d in docs:
+        src = d.metadata.get("source", "unknown")
+        page = d.metadata.get("page", "?")
+        blocks.append(f"[Source: {src}, Page {page}]\n{d.page_content}")
+    return "\n\n---\n\n".join(blocks)
+
+
+def _format_history(history: list[dict], max_turns: int = MAX_HISTORY_TURNS) -> str:
+    if not history:
+        return "(no prior turns)"
+    recent = history[-(2 * max_turns):]
+    lines = []
+    for msg in recent:
+        role = "User" if msg["role"] == "user" else "Assistant"
+        lines.append(f"{role}: {msg['content']}")
+    return "\n".join(lines)
+
 
 def _build_prompt(
     question: str,
@@ -79,52 +102,6 @@ def _build_prompt(
     return tmpl.format(context=context, question=question)
 
 
-# ── Result dataclass ───────────────────────────────────────────────────────
-
-@dataclass
-class RAGResult:
-    answer:  str
-    sources: list[dict] = field(default_factory=list)
-    # sources: list of {"source": str, "page": int, "text": str}
-
-
-# ── Internal helpers ───────────────────────────────────────────────────────
-
-def _get_vectorstore() -> Chroma:
-    embeddings = OllamaEmbeddings(model=EMBED_MODEL, base_url=OLLAMA_BASE_URL)
-    return Chroma(
-        collection_name=COLLECTION_NAME,
-        embedding_function=embeddings,
-        persist_directory=str(CHROMA_DIR),
-    )
-
-
-def _format_context(docs: list[Document]) -> str:
-    """Render retrieved chunks into the {context} block, tagged with citations."""
-    blocks = []
-    for d in docs:
-        src  = d.metadata.get("source", "unknown")
-        page = d.metadata.get("page", "?")
-        blocks.append(f"[Source: {src}, Page {page}]\n{d.page_content}")
-    return "\n\n---\n\n".join(blocks)
-
-
-def _format_history(history: list[dict], max_turns: int = MAX_HISTORY_TURNS) -> str:
-    """
-    Render the last `max_turns` user/assistant pairs as plain text.
-    `history` is a list of {"role": "user"|"assistant", "content": str}.
-    """
-    if not history:
-        return "(no prior turns)"
-    # Keep last 2 * max_turns messages (one pair = 2 messages)
-    recent = history[-(2 * max_turns):]
-    lines = []
-    for msg in recent:
-        role = "User" if msg["role"] == "user" else "Assistant"
-        lines.append(f"{role}: {msg['content']}")
-    return "\n".join(lines)
-
-
 _REWRITE_PROMPT = """Given the conversation history and a follow-up question, rewrite the follow-up question as a standalone question that can be understood without the history. If the question is already standalone, return it unchanged. Output ONLY the rewritten question with no preamble.
 
 Conversation history:
@@ -147,7 +124,6 @@ def _rewrite_question(llm: "OllamaLLM", question: str, history: list[dict]) -> s
 
 
 def _docs_to_sources(docs: list[Document]) -> list[dict]:
-    """Dedup retrieved docs by (source, page) for UI display."""
     sources, seen = [], set()
     for doc in docs:
         meta = doc.metadata
@@ -157,8 +133,8 @@ def _docs_to_sources(docs: list[Document]) -> list[dict]:
         seen.add(key)
         sources.append({
             "source": meta.get("source", "unknown"),
-            "page":   meta.get("page", "?"),
-            "text":   doc.page_content[:300],
+            "page": meta.get("page", "?"),
+            "text": doc.page_content[:300],
         })
     return sources
 
@@ -227,22 +203,21 @@ def _vector_retrieve(
     return retriever.invoke(question)
 
 
-# ── Public API: blocking query ─────────────────────────────────────────────
-
 def query(
-    question:       str,
-    model:          str  = LLM_MODEL,
-    top_k:          int  = TOP_K,
-    use_mmr:        bool = USE_MMR,
-    use_hybrid:     bool = USE_HYBRID,
-    use_rerank:     bool = USE_RERANK,
-    temperature:    float = 0.1,
-    history:        Optional[list[dict]] = None,
+    question: str,
+    model: str = LLM_MODEL,
+    top_k: int = TOP_K,
+    use_mmr: bool = USE_MMR,
+    use_hybrid: bool = USE_HYBRID,
+    use_rerank: bool = USE_RERANK,
+    temperature: float = 0.1,
+    history: Optional[list[dict]] = None,
     sources_filter: Optional[list[str]] = None,
-    system_prompt:  Optional[str] = None,
-    rewrite_query:  bool = False,
+    system_prompt: Optional[str] = None,
+    rewrite_query: bool = False,
 ) -> RAGResult:
     llm = OllamaLLM(model=model, base_url=OLLAMA_BASE_URL, temperature=temperature)
+
     retrieval_q = (
         _rewrite_question(llm, question, history)
         if (rewrite_query and history) else question
@@ -256,22 +231,21 @@ def query(
     return RAGResult(answer=answer, sources=_docs_to_sources(docs))
 
 
-# ── Public API: streaming query ────────────────────────────────────────────
-
 def stream_query(
-    question:       str,
-    model:          str  = LLM_MODEL,
-    top_k:          int  = TOP_K,
-    use_mmr:        bool = USE_MMR,
-    use_hybrid:     bool = USE_HYBRID,
-    use_rerank:     bool = USE_RERANK,
-    temperature:    float = 0.1,
-    history:        Optional[list[dict]] = None,
+    question: str,
+    model: str = LLM_MODEL,
+    top_k: int = TOP_K,
+    use_mmr: bool = USE_MMR,
+    use_hybrid: bool = USE_HYBRID,
+    use_rerank: bool = USE_RERANK,
+    temperature: float = 0.1,
+    history: Optional[list[dict]] = None,
     sources_filter: Optional[list[str]] = None,
-    system_prompt:  Optional[str] = None,
-    rewrite_query:  bool = False,
+    system_prompt: Optional[str] = None,
+    rewrite_query: bool = False,
 ) -> Generator[dict, None, None]:
     llm = OllamaLLM(model=model, base_url=OLLAMA_BASE_URL, temperature=temperature)
+
     retrieval_q = (
         _rewrite_question(llm, question, history)
         if (rewrite_query and history) else question
@@ -291,31 +265,24 @@ def stream_query(
     yield {"type": "done"}
 
 
-# ── Hallucination guard ────────────────────────────────────────────────────
+_CITATION_RE = re.compile(r"\[Source:\s*(.+?),\s*Page\s*(\d+)\]", re.IGNORECASE)
+
 
 def validate_citations(result: RAGResult, ingested_pages: dict[str, int]) -> list[str]:
-    """
-    Check that cited page numbers actually exist in ingested documents.
-    Returns list of warning strings (empty = all citations valid).
-    """
-    import re
     warnings = []
-    pattern = re.compile(r"\[Source:\s*(.+?),\s*Page\s*(\d+)\]", re.IGNORECASE)
-    for match in pattern.finditer(result.answer):
+    for match in _CITATION_RE.finditer(result.answer):
         fname, page_str = match.group(1).strip(), match.group(2)
         page = int(page_str)
         if fname in ingested_pages:
             if page > ingested_pages[fname]:
                 warnings.append(
-                    f"⚠️ Citation error: '{fname}' only has "
+                    f"Citation error: '{fname}' only has "
                     f"{ingested_pages[fname]} pages, but page {page} was cited."
                 )
         else:
-            warnings.append(f"⚠️ Citation error: '{fname}' is not in the ingested documents.")
+            warnings.append(f"Citation error: '{fname}' is not in the ingested documents.")
     return warnings
 
-
-# ── CLI convenience ────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import sys
@@ -325,4 +292,4 @@ if __name__ == "__main__":
     print(f"Answer:\n{res.answer}\n")
     print("Sources:")
     for s in res.sources:
-        print(f"  • {s['source']}  page {s['page']}")
+        print(f"  - {s['source']}  page {s['page']}")

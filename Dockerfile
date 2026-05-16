@@ -1,9 +1,3 @@
-# Dockerfile — Local RAG Chatbot
-#
-# This image runs the Streamlit app only. Ollama runs as a SEPARATE service
-# (see docker-compose.yml) because Ollama needs GPU access and a different
-# lifecycle. We connect to it via OLLAMA_BASE_URL.
-
 FROM python:3.11-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
