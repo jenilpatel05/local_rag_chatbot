@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY pyproject.toml README.md ./
 COPY rag_chatbot/ ./rag_chatbot/
+COPY tests/ ./tests/
 RUN pip install --no-cache-dir -e .
 
 RUN mkdir -p /app/data/chroma_db /app/uploads
