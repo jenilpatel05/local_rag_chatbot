@@ -11,6 +11,8 @@ import time
 import streamlit as st
 
 from rag_chatbot.config import (
+    CHUNK_OVERLAP,
+    CHUNK_SIZE,
     LLM_MODEL,
     MAX_HISTORY_TURNS,
     SUPPORTED_EXTENSIONS,
@@ -26,7 +28,7 @@ from rag_chatbot.ingest import (
     ingest_source,
     list_ingested_sources,
 )
-from rag_chatbot.rag_chain import query as rag_query, stream_query
+from rag_chatbot.rag_chain import BASE_RULES, query as rag_query, stream_query
 
 # ── Page config ────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -84,6 +86,15 @@ if "ingested" not in st.session_state:
 if "doc_filter" not in st.session_state:
     st.session_state.doc_filter = []
 
+_DEFAULTS = {
+    "adv_temperature":   0.1,
+    "adv_chunk_size":    CHUNK_SIZE,
+    "adv_chunk_overlap": CHUNK_OVERLAP,
+    "adv_system_prompt": BASE_RULES,
+}
+for k, v in _DEFAULTS.items():
+    st.session_state.setdefault(k, v)
+
 
 # ── Sidebar ────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -107,7 +118,11 @@ with st.sidebar:
             dest.write_bytes(uploaded.getbuffer())
             with st.spinner(f"Ingesting {uploaded.name} …"):
                 try:
-                    pages, chunks = ingest_source(dest)
+                    pages, chunks = ingest_source(
+                        dest,
+                        chunk_size=st.session_state.adv_chunk_size,
+                        chunk_overlap=st.session_state.adv_chunk_overlap,
+                    )
                 except Exception as e:
                     st.error(f"❌ {uploaded.name}: {e}")
                     continue
@@ -124,7 +139,11 @@ with st.sidebar:
             if url_input.strip():
                 with st.spinner(f"Fetching and ingesting {url_input} …"):
                     try:
-                        pages, chunks = ingest_source(url_input.strip())
+                        pages, chunks = ingest_source(
+                            url_input.strip(),
+                            chunk_size=st.session_state.adv_chunk_size,
+                            chunk_overlap=st.session_state.adv_chunk_overlap,
+                        )
                         if chunks > 0:
                             st.success(f"✅ Ingested {chunks} chunks from URL")
                         else:
@@ -181,6 +200,28 @@ with st.sidebar:
     use_rerank  = st.toggle("Cross-encoder rerank",            value=USE_RERANK)
     use_memory  = st.toggle("Chat memory (multi-turn)",        value=USE_CHAT_MEMORY)
     use_stream  = st.toggle("Stream tokens",                   value=USE_STREAMING)
+
+    with st.expander("Advanced settings"):
+        st.slider(
+            "Temperature", min_value=0.0, max_value=1.0, step=0.05,
+            key="adv_temperature",
+        )
+        st.number_input(
+            "Chunk size (new uploads only)", min_value=100, max_value=2000, step=50,
+            key="adv_chunk_size",
+        )
+        st.number_input(
+            "Chunk overlap (new uploads only)", min_value=0, max_value=500, step=10,
+            key="adv_chunk_overlap",
+        )
+        st.text_area(
+            "System prompt", height=200,
+            key="adv_system_prompt",
+        )
+        if st.button("Reset to defaults", use_container_width=True):
+            for k, v in _DEFAULTS.items():
+                st.session_state[k] = v
+            st.rerun()
 
     if st.button("🗑️ Clear conversation", use_container_width=True):
         st.session_state.messages = []
@@ -254,6 +295,8 @@ else:
                         use_rerank=use_rerank,
                         history=history,
                         sources_filter=st.session_state.doc_filter or None,
+                        system_prompt=st.session_state.adv_system_prompt,
+                        temperature=st.session_state.adv_temperature,
                     ):
                         if event["type"] == "sources":
                             sources = event["sources"]
@@ -310,6 +353,8 @@ else:
                             use_rerank=use_rerank,
                             history=history,
                             sources_filter=st.session_state.doc_filter or None,
+                            system_prompt=st.session_state.adv_system_prompt,
+                            temperature=st.session_state.adv_temperature,
                         )
                         elapsed = time.time() - t0
                         answer  = result.answer

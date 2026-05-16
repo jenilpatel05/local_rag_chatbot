@@ -17,7 +17,6 @@ from typing import Generator, Optional
 
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
-from langchain_core.prompts import PromptTemplate
 from langchain_ollama import OllamaEmbeddings, OllamaLLM
 
 from rag_chatbot.config import (
@@ -46,39 +45,38 @@ Rules:
 3. If the answer is not found in the context, respond exactly: "I don't know based on the provided documents."
 4. Be concise and factual. Do not repeat the question."""
 
-# Single-turn prompt (no history)
-RAG_PROMPT_TEMPLATE = BASE_RULES + """
-
-Context passages:
-{context}
-
-Question: {question}
-
-Answer (with citations):"""
-
-# Multi-turn prompt (with chat history)
-RAG_PROMPT_TEMPLATE_WITH_HISTORY = BASE_RULES + """
-5. Use the conversation history only to understand what the user is referring to (e.g. "that paper", "the second point"). Do not invent facts from it.
-
-Conversation history:
-{history}
-
-Context passages:
-{context}
-
-Current question: {question}
-
-Answer (with citations):"""
-
-RAG_PROMPT = PromptTemplate(
-    input_variables=["context", "question"],
-    template=RAG_PROMPT_TEMPLATE,
-)
-
-RAG_PROMPT_WITH_HISTORY = PromptTemplate(
-    input_variables=["history", "context", "question"],
-    template=RAG_PROMPT_TEMPLATE_WITH_HISTORY,
-)
+def _build_prompt(
+    question: str,
+    context: str,
+    history: Optional[list[dict]],
+    system_prompt: Optional[str],
+) -> str:
+    rules = system_prompt.strip() if system_prompt and system_prompt.strip() else BASE_RULES
+    if history:
+        history_rule = (
+            "\n5. Use the conversation history only to understand what the user is "
+            "referring to (e.g. \"that paper\", \"the second point\"). "
+            "Do not invent facts from it."
+        )
+        tmpl = (
+            rules + history_rule +
+            "\n\nConversation history:\n{history}"
+            "\n\nContext passages:\n{context}"
+            "\n\nCurrent question: {question}"
+            "\n\nAnswer (with citations):"
+        )
+        return tmpl.format(
+            history=_format_history(history),
+            context=context,
+            question=question,
+        )
+    tmpl = (
+        rules +
+        "\n\nContext passages:\n{context}"
+        "\n\nQuestion: {question}"
+        "\n\nAnswer (with citations):"
+    )
+    return tmpl.format(context=context, question=question)
 
 
 # ── Result dataclass ───────────────────────────────────────────────────────
@@ -220,21 +218,13 @@ def query(
     temperature:    float = 0.1,
     history:        Optional[list[dict]] = None,
     sources_filter: Optional[list[str]] = None,
+    system_prompt:  Optional[str] = None,
 ) -> RAGResult:
     docs = _retrieve(question, top_k, use_mmr, use_hybrid, use_rerank, sources_filter)
     context = _format_context(docs)
 
     llm = OllamaLLM(model=model, base_url=OLLAMA_BASE_URL, temperature=temperature)
-
-    if history:
-        prompt = RAG_PROMPT_WITH_HISTORY.format(
-            history=_format_history(history),
-            context=context,
-            question=question,
-        )
-    else:
-        prompt = RAG_PROMPT.format(context=context, question=question)
-
+    prompt = _build_prompt(question, context, history, system_prompt)
     answer = llm.invoke(prompt).strip()
     return RAGResult(answer=answer, sources=_docs_to_sources(docs))
 
@@ -251,6 +241,7 @@ def stream_query(
     temperature:    float = 0.1,
     history:        Optional[list[dict]] = None,
     sources_filter: Optional[list[str]] = None,
+    system_prompt:  Optional[str] = None,
 ) -> Generator[dict, None, None]:
     docs = _retrieve(question, top_k, use_mmr, use_hybrid, use_rerank, sources_filter)
     sources = _docs_to_sources(docs)
@@ -258,15 +249,7 @@ def stream_query(
 
     context = _format_context(docs)
     llm = OllamaLLM(model=model, base_url=OLLAMA_BASE_URL, temperature=temperature)
-
-    if history:
-        prompt = RAG_PROMPT_WITH_HISTORY.format(
-            history=_format_history(history),
-            context=context,
-            question=question,
-        )
-    else:
-        prompt = RAG_PROMPT.format(context=context, question=question)
+    prompt = _build_prompt(question, context, history, system_prompt)
 
     for chunk in llm.stream(prompt):
         if chunk:

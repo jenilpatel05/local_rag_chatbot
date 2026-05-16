@@ -142,14 +142,14 @@ def extract_pages(path_or_url: str | Path) -> list[dict]:
 
 # ── Chunking ───────────────────────────────────────────────────────────────
 
-def chunk_pages(pages: list[dict]) -> list[dict]:
-    """
-    Split page texts into overlapping chunks.
-    Each chunk keeps page number and source filename as metadata.
-    """
+def chunk_pages(
+    pages: list[dict],
+    chunk_size: int = CHUNK_SIZE,
+    chunk_overlap: int = CHUNK_OVERLAP,
+) -> list[dict]:
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=CHUNK_OVERLAP,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
         separators=["\n\n", "\n", ". ", " ", ""],
     )
 
@@ -187,14 +187,13 @@ def get_vectorstore() -> Chroma:
     )
 
 
-def ingest_source(path_or_url: str | Path) -> tuple[int, int]:
-    """
-    Full ingestion pipeline for one file or URL.
-    Returns (pages_processed, new_chunks_stored).
-    Skips chunks already present (idempotent via chunk_id).
-    """
+def ingest_source(
+    path_or_url: str | Path,
+    chunk_size: int = CHUNK_SIZE,
+    chunk_overlap: int = CHUNK_OVERLAP,
+) -> tuple[int, int]:
     pages  = extract_pages(path_or_url)
-    chunks = chunk_pages(pages)
+    chunks = chunk_pages(pages, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
 
     if not chunks:
         return 0, 0
