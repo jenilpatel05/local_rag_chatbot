@@ -12,6 +12,9 @@ license = { text = "MIT" }
 authors = [{ name = "Nandan Joshi" }]
 dynamic = ["dependencies"]
 
+[project.scripts]
+rag-chatbot = "rag_chatbot.cli:main"
+
 [tool.setuptools]
 packages = ["rag_chatbot"]
 
