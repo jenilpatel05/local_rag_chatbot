@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rag_chatbot"
+version = "0.2.0"
+description = "Fully local RAG chatbot with hybrid retrieval, reranking, and citations."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Nandan Joshi" }]
+dynamic = ["dependencies"]
+
+[project.scripts]
+rag-chatbot = "rag_chatbot.cli:main"
+
+[tool.setuptools]
+packages = ["rag_chatbot"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
