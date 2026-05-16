@@ -19,7 +19,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain_ollama import OllamaEmbeddings
 
-from config import (
+from rag_chatbot.config import (
     CHROMA_DIR,
     CHUNK_OVERLAP,
     CHUNK_SIZE,

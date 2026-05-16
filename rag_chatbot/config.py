@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 # ── Paths ──────────────────────────────────────────────────────────────────
-BASE_DIR    = Path(__file__).parent
+BASE_DIR    = Path(__file__).resolve().parent.parent
 CHROMA_DIR  = BASE_DIR / "data" / "chroma_db"
 UPLOADS_DIR = BASE_DIR / "uploads"
 

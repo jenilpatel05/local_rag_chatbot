@@ -13,7 +13,7 @@ from langchain_core.retrievers import BaseRetriever
 from langchain_core.callbacks import CallbackManagerForRetrieverRun
 from pydantic import Field
 
-from config import HYBRID_FETCH_K, HYBRID_VECTOR_WEIGHT
+from rag_chatbot.config import HYBRID_FETCH_K, HYBRID_VECTOR_WEIGHT
 
 
 class HybridRetriever(BaseRetriever):

@@ -10,7 +10,7 @@ import time
 
 import streamlit as st
 
-from config import (
+from rag_chatbot.config import (
     LLM_MODEL,
     MAX_HISTORY_TURNS,
     SUPPORTED_EXTENSIONS,
@@ -21,12 +21,12 @@ from config import (
     USE_RERANK,
     USE_STREAMING,
 )
-from ingest import (
+from rag_chatbot.ingest import (
     delete_source,
     ingest_source,
     list_ingested_sources,
 )
-from rag_chain import query as rag_query, stream_query
+from rag_chatbot.rag_chain import query as rag_query, stream_query
 
 # ── Page config ────────────────────────────────────────────────────────────
 st.set_page_config(

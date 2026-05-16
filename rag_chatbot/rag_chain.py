@@ -20,7 +20,7 @@ from langchain_core.documents import Document
 from langchain_core.prompts import PromptTemplate
 from langchain_ollama import OllamaEmbeddings, OllamaLLM
 
-from config import (
+from rag_chatbot.config import (
     CHROMA_DIR,
     COLLECTION_NAME,
     EMBED_MODEL,
@@ -160,8 +160,8 @@ def _retrieve(
 
     # Hybrid path
     if use_hybrid:
-        from ingest import get_all_chunks
-        from hybrid_retriever import build_hybrid_retriever
+        from rag_chatbot.ingest import get_all_chunks
+        from rag_chatbot.hybrid_retriever import build_hybrid_retriever
         try:
             hybrid = build_hybrid_retriever(vs, get_all_chunks(), top_k=fetch_k)
             docs = hybrid.invoke(question)
@@ -173,7 +173,7 @@ def _retrieve(
 
     # Optional rerank
     if use_rerank and docs:
-        from reranker import rerank
+        from rag_chatbot.reranker import rerank
         docs = rerank(question, docs, top_k=top_k)
     else:
         docs = docs[:top_k]

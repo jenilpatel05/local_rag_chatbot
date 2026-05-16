@@ -28,8 +28,8 @@ from ragas.metrics import (
     faithfulness,
 )
 
-from rag_chain import query as rag_query
-from config import LLM_MODEL, TOP_K
+from rag_chatbot.rag_chain import query as rag_query
+from rag_chatbot.config import LLM_MODEL, TOP_K
 
 
 def run_evaluation(qa_path: str | Path, model: str = LLM_MODEL, top_k: int = TOP_K):

@@ -17,7 +17,7 @@ from functools import lru_cache
 
 from langchain_core.documents import Document
 
-from config import RERANK_MODEL
+from rag_chatbot.config import RERANK_MODEL
 
 
 @lru_cache(maxsize=1)
