@@ -94,6 +94,7 @@ _DEFAULTS = {
     "adv_chunk_size":    CHUNK_SIZE,
     "adv_chunk_overlap": CHUNK_OVERLAP,
     "adv_system_prompt": BASE_RULES,
+    "use_rewrite":       False,
 }
 for k, v in _DEFAULTS.items():
     st.session_state.setdefault(k, v)
@@ -203,6 +204,11 @@ with st.sidebar:
     use_rerank  = st.toggle("Cross-encoder rerank",            value=USE_RERANK)
     use_memory  = st.toggle("Chat memory (multi-turn)",        value=USE_CHAT_MEMORY)
     use_stream  = st.toggle("Stream tokens",                   value=USE_STREAMING)
+    st.toggle(
+        "Rewrite follow-up questions",
+        key="use_rewrite",
+        help="Turn 'what about chapter 4?' into a standalone query before retrieval.",
+    )
 
     with st.expander("Advanced settings"):
         st.slider(
@@ -326,6 +332,7 @@ else:
                         sources_filter=st.session_state.doc_filter or None,
                         system_prompt=st.session_state.adv_system_prompt,
                         temperature=st.session_state.adv_temperature,
+                        rewrite_query=st.session_state.use_rewrite,
                     ):
                         if event["type"] == "sources":
                             sources = event["sources"]
@@ -384,6 +391,7 @@ else:
                             sources_filter=st.session_state.doc_filter or None,
                             system_prompt=st.session_state.adv_system_prompt,
                             temperature=st.session_state.adv_temperature,
+                            rewrite_query=st.session_state.use_rewrite,
                         )
                         elapsed = time.time() - t0
                         answer  = result.answer

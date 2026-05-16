@@ -125,6 +125,27 @@ def _format_history(history: list[dict], max_turns: int = MAX_HISTORY_TURNS) -> 
     return "\n".join(lines)
 
 
+_REWRITE_PROMPT = """Given the conversation history and a follow-up question, rewrite the follow-up question as a standalone question that can be understood without the history. If the question is already standalone, return it unchanged. Output ONLY the rewritten question with no preamble.
+
+Conversation history:
+{history}
+
+Follow-up question: {question}
+
+Standalone question:"""
+
+
+def _rewrite_question(llm: "OllamaLLM", question: str, history: list[dict]) -> str:
+    try:
+        rewritten = llm.invoke(
+            _REWRITE_PROMPT.format(history=_format_history(history), question=question)
+        ).strip()
+        rewritten = rewritten.strip('"').strip("'").strip()
+        return rewritten or question
+    except Exception:
+        return question
+
+
 def _docs_to_sources(docs: list[Document]) -> list[dict]:
     """Dedup retrieved docs by (source, page) for UI display."""
     sources, seen = [], set()
@@ -219,11 +240,17 @@ def query(
     history:        Optional[list[dict]] = None,
     sources_filter: Optional[list[str]] = None,
     system_prompt:  Optional[str] = None,
+    rewrite_query:  bool = False,
 ) -> RAGResult:
-    docs = _retrieve(question, top_k, use_mmr, use_hybrid, use_rerank, sources_filter)
+    llm = OllamaLLM(model=model, base_url=OLLAMA_BASE_URL, temperature=temperature)
+    retrieval_q = (
+        _rewrite_question(llm, question, history)
+        if (rewrite_query and history) else question
+    )
+
+    docs = _retrieve(retrieval_q, top_k, use_mmr, use_hybrid, use_rerank, sources_filter)
     context = _format_context(docs)
 
-    llm = OllamaLLM(model=model, base_url=OLLAMA_BASE_URL, temperature=temperature)
     prompt = _build_prompt(question, context, history, system_prompt)
     answer = llm.invoke(prompt).strip()
     return RAGResult(answer=answer, sources=_docs_to_sources(docs))
@@ -242,13 +269,19 @@ def stream_query(
     history:        Optional[list[dict]] = None,
     sources_filter: Optional[list[str]] = None,
     system_prompt:  Optional[str] = None,
+    rewrite_query:  bool = False,
 ) -> Generator[dict, None, None]:
-    docs = _retrieve(question, top_k, use_mmr, use_hybrid, use_rerank, sources_filter)
+    llm = OllamaLLM(model=model, base_url=OLLAMA_BASE_URL, temperature=temperature)
+    retrieval_q = (
+        _rewrite_question(llm, question, history)
+        if (rewrite_query and history) else question
+    )
+
+    docs = _retrieve(retrieval_q, top_k, use_mmr, use_hybrid, use_rerank, sources_filter)
     sources = _docs_to_sources(docs)
     yield {"type": "sources", "sources": sources}
 
     context = _format_context(docs)
-    llm = OllamaLLM(model=model, base_url=OLLAMA_BASE_URL, temperature=temperature)
     prompt = _build_prompt(question, context, history, system_prompt)
 
     for chunk in llm.stream(prompt):
